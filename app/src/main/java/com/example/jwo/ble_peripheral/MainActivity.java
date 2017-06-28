@@ -48,6 +48,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private BluetoothGattServer mGattServer;
     private BluetoothGattCharacteristic mAlarmCharacteristic;
     private BluetoothGattService mAlarmService;
+    private BluetoothGattDescriptor mAlarmReadDescriptor;
+    private BluetoothGattDescriptor mAlarmWriteDescriptor;
     private ListView listView;
 
     private ArrayList<BluetoothDevice> mConnectedDevices;
@@ -55,6 +57,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
     private static final UUID ALARM_SERVICE_UUID = UUID.fromString("FF890198-9446-4E3A-B173-4E1161D6F59B");
     private static final UUID ALARM_CHARACTERISTIC_UUID = UUID.fromString("77B4350C-DEA3-4DBA-B650-251670F4B2B4");
+    private static final UUID ALARM_READ_DESCRIPTOR_UUID = UUID.fromString("78BC6802-D599-40DC-83E1-C1AB25ACCB18");
+    private static final UUID ALARM_WRITE_DESCRIPTOR_UUID = UUID.fromString("B1832A77-6802-4C62-9E0F-F3B509D55B17");
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -111,13 +115,15 @@ public class MainActivity extends Activity implements View.OnClickListener {
                                     BluetoothGattCharacteristic.PROPERTY_READ | BluetoothGattCharacteristic.PROPERTY_WRITE,
                                     BluetoothGattCharacteristic.PERMISSION_READ | BluetoothGattCharacteristic.PERMISSION_WRITE);
 
+
+        mAlarmReadDescriptor  = new BluetoothGattDescriptor(ALARM_READ_DESCRIPTOR_UUID, BluetoothGattDescriptor.PERMISSION_READ);
+        mAlarmWriteDescriptor = new BluetoothGattDescriptor(ALARM_WRITE_DESCRIPTOR_UUID, BluetoothGattDescriptor.PERMISSION_WRITE);
+        mAlarmCharacteristic.addDescriptor(mAlarmReadDescriptor);
+        mAlarmCharacteristic.addDescriptor(mAlarmWriteDescriptor);
         mAlarmService.addCharacteristic(mAlarmCharacteristic);
         mGattServer.addService(mAlarmService);
     }
 
-    /*
-     * Terminate the server and any running callbacks
-     */
     private void shutdownServer() {
         mHandler.removeCallbacks(mNotifyRunnable);
 
@@ -134,10 +140,6 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     };
 
-    /*
-     * Callback handles all incoming requests from GATT clients.
-     * From connections to read/write requests.
-     */
     private BluetoothGattServerCallback mGattServerCallback = new BluetoothGattServerCallback() {
         @Override
         public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
@@ -210,9 +212,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     };
 
-    /*
-     * Initialize the advertiser
-     */
+
     private void startAdvertising() {
         Log.v(TAG,"start Advertising");
         if (mBluetoothLeAdvertiser == null) return;
@@ -281,7 +281,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
         });
     }
 
-    /* Storage and access to local characteristic data */
+
 
     private void notifyConnectedDevices() {
         for (BluetoothDevice device : mConnectedDevices) {
