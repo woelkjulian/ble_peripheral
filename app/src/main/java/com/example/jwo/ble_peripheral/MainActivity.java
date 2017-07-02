@@ -57,6 +57,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
     private static final UUID ALARM_SERVICE_UUID = UUID.fromString("FF890198-9446-4E3A-B173-4E1161D6F59B");
     private static final UUID ALARM_CHARACTERISTIC_UUID = UUID.fromString("77B4350C-DEA3-4DBA-B650-251670F4B2B4");
     private static final UUID ALARM_DESCRIPTOR_UUID = UUID.fromString("78BC6802-D599-40DC-83E1-C1AB25ACCB18");
+    private boolean oldAlarmValue;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -70,6 +71,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mBluetoothManager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
         mBluetoothAdapter = mBluetoothManager.getAdapter();
         storedValue = new byte[4];
+        oldAlarmValue = false;
     }
 
     @Override
@@ -128,20 +130,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
     }
 
     private void shutdownServer() {
-        mHandler.removeCallbacks(mNotifyRunnable);
-
         if (mGattServer == null) return;
-
         mGattServer.close();
     }
-
-    private Runnable mNotifyRunnable = new Runnable() {
-        @Override
-        public void run() {
-            notifyConnectedDevices();
-            mHandler.postDelayed(this, 2000);
-        }
-    };
 
     private BluetoothGattServerCallback mGattServerCallback = new BluetoothGattServerCallback() {
         @Override
@@ -275,11 +266,6 @@ public class MainActivity extends Activity implements View.OnClickListener {
             }
 
             //Trigger our periodic notification once devices are connected
-            mHandler.removeCallbacks(mNotifyRunnable);
-            if (!mConnectedDevices.isEmpty()) {
-                mHandler.post(mNotifyRunnable);
-            }
-
             mConnectedDevicesAdapter.notifyDataSetChanged();
             }
         });
@@ -315,8 +301,6 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 invalidateOptionsMenu();
             }
         }
-
-        notifyConnectedDevices();
     }
 
     @Override
@@ -368,13 +352,20 @@ public class MainActivity extends Activity implements View.OnClickListener {
     public void setAlarm(boolean b) {
         byte[] value = new byte[4];
 
-        if(b) {
-            Log.i(TAG, "ALARM TRIGGERED");
-            value[0] = (byte) (01 & 0xFF);
-            setStoredValue(value);
-        } else {
-            value[0] = (byte) (00 & 0xFF);
-            setStoredValue(value);
+        if(oldAlarmValue != b) {
+            Log.i(TAG, "send new Notification");
+            if(b) {
+                Log.i(TAG, "ALARM TRIGGERED");
+                value[0] = (byte) (01 & 0xFF);
+                setStoredValue(value);
+            } else {
+                value[0] = (byte) (00 & 0xFF);
+                setStoredValue(value);
+            }
+            notifyConnectedDevices();
+
+            oldAlarmValue = b;
         }
+
     }
 }
