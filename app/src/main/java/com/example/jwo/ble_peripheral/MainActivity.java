@@ -17,6 +17,7 @@ import android.bluetooth.le.AdvertiseSettings;
 import android.bluetooth.le.BluetoothLeAdvertiser;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Handler;
 import android.os.ParcelUuid;
@@ -41,24 +42,21 @@ import java.util.UUID;
 public class MainActivity extends Activity implements View.OnClickListener {
 
     private static final String TAG = "MainActivity";
-
     private BluetoothManager mBluetoothManager;
     private BluetoothAdapter mBluetoothAdapter;
     private BluetoothLeAdvertiser mBluetoothLeAdvertiser;
     private BluetoothGattServer mGattServer;
     private BluetoothGattCharacteristic mAlarmCharacteristic;
     private BluetoothGattService mAlarmService;
-    private BluetoothGattDescriptor mAlarmReadDescriptor;
-    private BluetoothGattDescriptor mAlarmWriteDescriptor;
+    private BluetoothGattDescriptor mAlarmDescriptor;
+    private byte[] storedValue;
     private ListView listView;
-
+    private AufnahmeTask aufnahmeTask;
     private ArrayList<BluetoothDevice> mConnectedDevices;
     private ArrayAdapter<BluetoothDevice> mConnectedDevicesAdapter;
-
     private static final UUID ALARM_SERVICE_UUID = UUID.fromString("FF890198-9446-4E3A-B173-4E1161D6F59B");
     private static final UUID ALARM_CHARACTERISTIC_UUID = UUID.fromString("77B4350C-DEA3-4DBA-B650-251670F4B2B4");
-    private static final UUID ALARM_READ_DESCRIPTOR_UUID = UUID.fromString("78BC6802-D599-40DC-83E1-C1AB25ACCB18");
-    private static final UUID ALARM_WRITE_DESCRIPTOR_UUID = UUID.fromString("B1832A77-6802-4C62-9E0F-F3B509D55B17");
+    private static final UUID ALARM_DESCRIPTOR_UUID = UUID.fromString("78BC6802-D599-40DC-83E1-C1AB25ACCB18");
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,11 +65,11 @@ public class MainActivity extends Activity implements View.OnClickListener {
         listView = (ListView) findViewById(R.id.listView);
 
         mConnectedDevices = new ArrayList<BluetoothDevice>();
-        mConnectedDevicesAdapter = new ArrayAdapter<BluetoothDevice>(this,
-                android.R.layout.simple_list_item_1, mConnectedDevices);
+        mConnectedDevicesAdapter = new CentralItemAdapter(this, mConnectedDevices);
         listView.setAdapter(mConnectedDevicesAdapter);
         mBluetoothManager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
         mBluetoothAdapter = mBluetoothManager.getAdapter();
+        storedValue = new byte[4];
     }
 
     @Override
@@ -100,6 +98,11 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
         initServer();
         startAdvertising();
+
+        setAlarm(false);
+
+        aufnahmeTask = new AufnahmeTask(this);
+        aufnahmeTask.execute();
     }
 
     @Override
@@ -107,6 +110,8 @@ public class MainActivity extends Activity implements View.OnClickListener {
         super.onPause();
         stopAdvertising();
         shutdownServer();
+        aufnahmeTask.cancel(true);
+        aufnahmeTask = null;
     }
 
     private void initServer() {
@@ -115,11 +120,9 @@ public class MainActivity extends Activity implements View.OnClickListener {
                                     BluetoothGattCharacteristic.PROPERTY_READ | BluetoothGattCharacteristic.PROPERTY_WRITE,
                                     BluetoothGattCharacteristic.PERMISSION_READ | BluetoothGattCharacteristic.PERMISSION_WRITE);
 
-
-        mAlarmReadDescriptor  = new BluetoothGattDescriptor(ALARM_READ_DESCRIPTOR_UUID, BluetoothGattDescriptor.PERMISSION_READ);
-        mAlarmWriteDescriptor = new BluetoothGattDescriptor(ALARM_WRITE_DESCRIPTOR_UUID, BluetoothGattDescriptor.PERMISSION_WRITE);
-        mAlarmCharacteristic.addDescriptor(mAlarmReadDescriptor);
-        mAlarmCharacteristic.addDescriptor(mAlarmWriteDescriptor);
+        mAlarmDescriptor  = new BluetoothGattDescriptor(ALARM_DESCRIPTOR_UUID, BluetoothGattDescriptor.PERMISSION_WRITE | BluetoothGattDescriptor.PERMISSION_WRITE);
+        mAlarmDescriptor.setValue(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE);
+        mAlarmCharacteristic.addDescriptor(mAlarmDescriptor);
         mAlarmService.addCharacteristic(mAlarmCharacteristic);
         mGattServer.addService(mAlarmService);
     }
@@ -171,7 +174,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
                         requestId,
                         BluetoothGatt.GATT_SUCCESS,
                         0,
-                        bytesFromInt(mTimeOffset));
+                        getStoredValue());
             }
 
             mGattServer.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null);
@@ -189,8 +192,7 @@ public class MainActivity extends Activity implements View.OnClickListener {
             Log.i(TAG, "onCharacteristicWriteRequest "+characteristic.getUuid().toString());
 
             if (ALARM_CHARACTERISTIC_UUID.equals(characteristic.getUuid())) {
-                int newOffset = unsignedIntFromBytes(value);
-                setStoredValue(newOffset);
+                setStoredValue(value);
 
                 if (responseNeeded) {
                     mGattServer.sendResponse(device,
@@ -265,23 +267,23 @@ public class MainActivity extends Activity implements View.OnClickListener {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
-                //This will add the item to our list and update the adapter at the same time.
-                if (toAdd) {
-                    mConnectedDevicesAdapter.add(device);
-                } else {
-                    mConnectedDevicesAdapter.remove(device);
-                }
+            //This will add the item to our list and update the adapter at the same time.
+            if (toAdd) {
+                mConnectedDevicesAdapter.add(device);
+            } else {
+                mConnectedDevicesAdapter.remove(device);
+            }
 
-                //Trigger our periodic notification once devices are connected
-                mHandler.removeCallbacks(mNotifyRunnable);
-                if (!mConnectedDevices.isEmpty()) {
-                    mHandler.post(mNotifyRunnable);
-                }
+            //Trigger our periodic notification once devices are connected
+            mHandler.removeCallbacks(mNotifyRunnable);
+            if (!mConnectedDevices.isEmpty()) {
+                mHandler.post(mNotifyRunnable);
+            }
+
+            mConnectedDevicesAdapter.notifyDataSetChanged();
             }
         });
     }
-
-
 
     private void notifyConnectedDevices() {
         for (BluetoothDevice device : mConnectedDevices) {
@@ -294,18 +296,27 @@ public class MainActivity extends Activity implements View.OnClickListener {
 
     private Object mLock = new Object();
 
-    private int mTimeOffset;
-
     private byte[] getStoredValue() {
         synchronized (mLock) {
-            return getShiftedTimeValue(mTimeOffset);
+            return storedValue;
         }
     }
 
-    private void setStoredValue(int newOffset) {
+    private void setStoredValue(byte[] newValue) {
         synchronized (mLock) {
-            mTimeOffset = newOffset;
+            storedValue = newValue;
+            if (unsignedIntFromBytes(storedValue) == 1) {
+                ((CentralItemAdapter) mConnectedDevicesAdapter).setState(CentralItemAdapter.States.ALARM);
+                mConnectedDevicesAdapter.notifyDataSetChanged();
+                invalidateOptionsMenu();
+            } else if (unsignedIntFromBytes(storedValue) == 0) {
+                ((CentralItemAdapter) mConnectedDevicesAdapter).setState(CentralItemAdapter.States.STANDARD);
+                mConnectedDevicesAdapter.notifyDataSetChanged();
+                invalidateOptionsMenu();
+            }
         }
+
+        notifyConnectedDevices();
     }
 
     @Override
@@ -337,12 +348,6 @@ public class MainActivity extends Activity implements View.OnClickListener {
         }
     }
 
-    public static byte[] getShiftedTimeValue(int timeOffset) {
-        int value = Math.max(0,
-                (int)(System.currentTimeMillis()/1000) - timeOffset);
-        return bytesFromInt(value);
-    }
-
     public static int unsignedIntFromBytes(byte[] raw) {
         if (raw.length < 4) throw new IllegalArgumentException("Cannot convert raw data to int");
 
@@ -360,4 +365,16 @@ public class MainActivity extends Activity implements View.OnClickListener {
                 .array();
     }
 
+    public void setAlarm(boolean b) {
+        byte[] value = new byte[4];
+
+        if(b) {
+            Log.i(TAG, "ALARM TRIGGERED");
+            value[0] = (byte) (01 & 0xFF);
+            setStoredValue(value);
+        } else {
+            value[0] = (byte) (00 & 0xFF);
+            setStoredValue(value);
+        }
+    }
 }
